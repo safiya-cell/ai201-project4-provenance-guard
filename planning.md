@@ -117,19 +117,108 @@ POST /appeal
   { submission_id, status: "under_appeal", message }
 
 ## AI Tool Plan ##
-M3 — Submission endpoint + Signal 1
+I am building a Flask API called Provenance Guard that detects whether text
+is AI-generated. Here is my spec and architecture diagram. Generate two things:
+(1) a Flask app skeleton with the POST /submit route stubbed out, and
+(2) the first signal function. Do not implement the full logic yet — I will
+wire the pieces together after reviewing each one.
 
-I will ask for a minimal Flask app skeleton with POST /submit wired up.
-The extract_perplexity_score(text: str) -> float function returning
-a normalised score in [0, 1].
+--- ARCHITECTURE DIAGRAM ---
 
-Ask to call extract_perplexity_score directly on three inputs: a clearly
-AI-generated paragraph, a clearly human-written paragraph, and a 5-word
-sentence.
-Check that the AI paragraph scores higher than the human paragraph.
-Check that the short text returns a score near 0.5 with a warning flag.
-Do not wire into the endpoint until these three checks pass.
+SUBMISSION FLOW
+===============
 
+POST /submit
+  { text, creator_id }
+        |
+        v
+  Submission Handler
+  - assigns submission_id (uuid)
+  - validates input (text must be present, creator_id must be present)
+        |
+        v
+  Signal 1: Perplexity Extractor
+  { raw text }  -->  { signal_1_score: float [0,1] }
+        |
+        v
+  Signal 2: Burstiness Extractor  [STUB ONLY - implement in M4]
+  { raw text }  -->  { signal_2_score: float [0,1] }
+        |
+        v
+  Confidence Scorer  [STUB ONLY - implement in M4]
+  { signal_1_score, signal_2_score }
+  -->  combined_score = 0.6 x s1 + 0.4 x s2
+        |
+        v
+  Label Generator  [STUB ONLY - implement in M5]
+  { combined_score }  -->  { label: string }
+        |
+        v
+  Audit Logger
+  writes: { submission_id, creator_id, text_hash,
+            signal_1_score, signal_2_score,
+            combined_score, label, timestamp,
+            status: "complete" }
+        |
+        v
+  Response
+  { submission_id, label, confidence,
+    signal_scores: { signal_1, signal_2 } }
+
+--- DETECTION SIGNAL 1 SPEC ---
+
+Signal name: Perplexity
+What it measures: How predictable the word choices are under a language model.
+AI text picks highly probable next words at each step, making it very
+predictable (low perplexity). Human text is messier and less predictable
+(higher perplexity).
+
+Function signature:
+  extract_perplexity_score(text: str) -> float
+
+Output: A float in [0, 1].
+  1.0 = very predictable = likely AI
+  0.0 = very unpredictable = likely human
+
+Normalisation: raw perplexity is an unbounded positive number. Normalise it
+to [0, 1] by clipping: perplexity <= 10 maps to score 1.0, perplexity >= 200
+maps to score 0.0, linear scaling in between.
+
+Formula: score = 1.0 - clamp((perplexity - 10) / (200 - 10), 0.0, 1.0)
+
+Short text warning: if the input text has fewer than 50 words, return the
+score as normal but also set a flag {"short_text_warning": true} in the
+return value. Because: perplexity estimates are unreliable on very short texts.
+
+Use the GPT-2 model via the transformers library to compute perplexity.
+
+--- WHAT TO GENERATE ---
+
+1. Flask app skeleton (app.py):
+   - Import Flask, uuid, datetime, json
+   - In-memory audit log: a Python dict called `audit_log`
+   - POST /submit route that:
+     a. Parses JSON body for "text" and "creator_id"
+     b. Returns 400 if either is missing
+     c. Calls extract_perplexity_score(text) [stub the other steps]
+     d. Writes a record to audit_log
+     e. Returns JSON: { submission_id, label, confidence, signal_scores }
+   - For now, stub label as "pending" and confidence as signal_1_score
+     until M4 wires in the confidence scorer
+
+2. Signal 1 function (signals.py):
+   - extract_perplexity_score(text: str) -> dict
+   - Returns: { "score": float, "short_text_warning": bool }
+   - Uses GPT-2 via transformers to compute perplexity
+   - Applies the normalisation formula above
+
+--- WHAT NOT TO GENERATE ---
+- Do not implement Signal 2, the confidence scorer, or the label generator yet
+- Do not add authentication
+- Do not use a database — in-memory dict is fine for M3
+
+--- OUTPUT FORMAT ---
+Return app.py and signals.py as two separate code blocks.
 
 M4 — Signal 2 + Confidence scoring
 
