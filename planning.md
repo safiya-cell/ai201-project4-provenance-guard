@@ -1,0 +1,1 @@
+ POST /appeal receives a submission ID and the creator's explanation. The appeal handler looks up the original record in the audit log, updates its status to "under appeal," appends the appeal reason, and returns a confirmation. 
